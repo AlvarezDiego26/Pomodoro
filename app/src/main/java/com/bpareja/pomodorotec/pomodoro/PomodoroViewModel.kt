@@ -5,9 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.media.RingtoneManager
 import android.os.CountDownTimer
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -21,6 +18,7 @@ import com.bpareja.pomodorotec.R
 import com.bpareja.pomodorotec.utils.DataSyncManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.media.RingtoneManager
 
 enum class Phase {
     FOCUS, BREAK
@@ -102,6 +100,19 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
 
                 // ----------- GUARDAR DATOS PARA EL WIDGET -------------
                 updateWidgetData()
+
+                // ----------- ACTUALIZAR NOTIFICACIÓN -------------
+                val notificationTitle = when (_currentPhase.value) {
+                    Phase.FOCUS -> "Concentración"
+                    Phase.BREAK -> "Descanso"
+                    else -> "Pomodoro"
+                }
+                val notificationMessage = when (_currentPhase.value) {
+                    Phase.FOCUS -> "Tiempo: ${_timeLeft.value} (${(progress * 100).toInt()}% completado)"
+                    Phase.BREAK -> "Tiempo: ${_timeLeft.value} (${(progress * 100).toInt()}% completado)"
+                    else -> "Tiempo: ${_timeLeft.value}"
+                }
+                showNotification(notificationTitle, notificationMessage)
             }
             override fun onFinish() {
                 _isRunning.value = false
@@ -135,6 +146,17 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         countDownTimer?.cancel()
         _isRunning.value = false
         // Actualizar notificación si quieres aquí
+        val notificationTitle = when (_currentPhase.value) {
+            Phase.FOCUS -> "Concentración"
+            Phase.BREAK -> "Descanso"
+            else -> "Pomodoro"
+        }
+        val notificationMessage = when (_currentPhase.value) {
+            Phase.FOCUS -> "Tiempo: ${_timeLeft.value} (${(_progress.value!! * 100).toInt()}% completado)"
+            Phase.BREAK -> "Tiempo: ${_timeLeft.value} (${(_progress.value!! * 100).toInt()}% completado)"
+            else -> "Tiempo: ${_timeLeft.value}"
+        }
+        showNotification(notificationTitle, notificationMessage)
     }
 
     fun resetTimer() {
@@ -148,6 +170,7 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
         _isSkipBreakButtonVisible.value = false
         // Actualizar widget aquí también si quieres
         updateWidgetData()
+        showNotification("Pomodoro", "Tiempo: 25:00 (0% completado)")
     }
 
     // -------------- ACTUALIZACIÓN DE WIDGET -----------------
@@ -180,30 +203,16 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             context, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
 
-        val customTitle = when (_currentPhase.value) {
-            Phase.FOCUS -> "🎯 ¡Tiempo de Concentración!"
-            Phase.BREAK -> "☕ ¡Momento de Descanso!"
-            else -> title
-        }
-        val formattedTime = _timeLeft.value?.let { if (it != "00:00") it else "Finalizado" } ?: "25:00"
-        val customMessage = when (_currentPhase.value) {
-            Phase.FOCUS -> "⏰ Restan $formattedTime\n💪 ¡Mantén el enfoque!"
-            Phase.BREAK -> "⏰ Restan $formattedTime\n🧘‍♂️ ¡Relájate unos minutos!"
-            else -> message
-        }
-        val bigImage = BitmapFactory.decodeResource(
-            context.resources,
-            if (_currentPhase.value == Phase.FOCUS) R.drawable.focus_image
-            else R.drawable.break_image
-        )
-        val style = NotificationCompat.BigPictureStyle().bigPicture(bigImage)
+        val customTitle = title
+        val customMessage = message
 
-        val notificationColor = if (_currentPhase.value == Phase.FOCUS) Color.rgb(178, 34, 34) else Color.rgb(46, 139, 87)
+        val notificationColor = if (_currentPhase.value == Phase.FOCUS) {
+            android.graphics.Color.rgb(178, 34, 34) // Firebrick para enfoque
+        } else {
+            android.graphics.Color.rgb(46, 139, 87) // SeaGreen para descanso
+        }
 
-        val vibrationPattern = if (_currentPhase.value == Phase.FOCUS)
-            longArrayOf(0, 100, 100, 100)
-        else
-            longArrayOf(0, 500, 500)
+        val vibrationPattern = longArrayOf(0, 200, 100, 200) // Vibración suave
 
         // Intents para acciones
         val pauseIntent = Intent(context, PomodoroReceiver::class.java).apply { action = "PAUSE_TIMER" }
@@ -235,31 +244,27 @@ class PomodoroViewModel(application: Application) : AndroidViewModel(application
             )
             .setContentTitle(customTitle)
             .setContentText(customMessage)
-            .setStyle(style)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(customMessage))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
             .setColor(notificationColor)
             .setColorized(true)
-            .setLights(notificationColor, 1000, 1000)
+            .setLights(notificationColor, 500, 500)
             .setVibrate(vibrationPattern)
             .setProgress(100, progress, false)
             .setSound(
-                RingtoneManager.getDefaultUri(
-                    if (_currentPhase.value == Phase.FOCUS) RingtoneManager.TYPE_RINGTONE
-                    else RingtoneManager.TYPE_NOTIFICATION
-                )
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             )
-            // Botones
             .addAction(R.drawable.baseline_pause_circle_24, "Pausar", pausePendingIntent)
             .addAction(R.drawable.ic_resume, "Reanudar", resumePendingIntent)
-            .addAction(R.drawable.ic_stop, "Terminar", endPendingIntent)
+            .addAction(R.drawable.ic_stop, "Reiniciar", endPendingIntent)
 
         if (_currentPhase.value == Phase.BREAK) {
             builder.addAction(
                 R.drawable.ic_skip,
-                "Saltar Descanso",
+                "Saltar",
                 skipPendingIntent
             )
         }
